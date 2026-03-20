@@ -1,0 +1,13 @@
+[project]
+name = "bot-attention-mcp"
+version = "0.1.0"
+description = "Low-cost attention / trigger MCP for Astrbot-style pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=3.1",
+    "pydantic>=2",
+]
+
+[project.scripts]
+bot-attention-mcp = "attention.server:main"

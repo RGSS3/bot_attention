@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+design.md
+data/state.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
