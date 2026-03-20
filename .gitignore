@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 design.md
+ad.md
 data/state.json
 data/*.db
 data/*.db-wal

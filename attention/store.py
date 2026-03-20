@@ -67,7 +67,35 @@ def _row_to_rule(row: sqlite3.Row) -> TriggerRule:
 
 
 def fetch_rules(conn: sqlite3.Connection) -> list[TriggerRule]:
+    """All rows (admin / audit). Includes disabled, ended, expired-by-status, etc."""
     cur = conn.execute("SELECT * FROM trigger_rules ORDER BY priority DESC, rule_id ASC")
+    return [_row_to_rule(r) for r in cur.fetchall()]
+
+
+def fetch_rules_for_eval(
+    conn: sqlite3.Connection,
+    *,
+    group_id: str,
+    user_id: str,
+    now_ts: int,
+) -> list[TriggerRule]:
+    """Candidate rules for one evaluate call: enabled, status=active, in time bounds, scope matches.
+
+    Daily ``time_window`` is still enforced in the engine (not expressed in SQL).
+    """
+    cur = conn.execute(
+        """
+        SELECT * FROM trigger_rules
+        WHERE enabled = 1
+          AND status = 'active'
+          AND (starts_at IS NULL OR starts_at <= ?)
+          AND (expires_at IS NULL OR expires_at >= ?)
+          AND (group_id = '*' OR group_id = ?)
+          AND (user_id = '*' OR user_id = ?)
+        ORDER BY priority DESC, rule_id ASC
+        """,
+        (now_ts, now_ts, group_id, user_id),
+    )
     return [_row_to_rule(r) for r in cur.fetchall()]
 
 

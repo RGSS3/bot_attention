@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -18,6 +19,7 @@ from attention.store import (
     connect,
     end_rule_status,
     fetch_rules,
+    fetch_rules_for_eval,
     get_fire_row,
     init_schema,
     maybe_seed_from_json,
@@ -83,10 +85,14 @@ if _role in ("full", "gate"):
         """Decide whether the QQ persona should *consider* replying (no NLP/LLM).
 
         Astrbot can pass message_str, group_id, sender id, timestamp.
+        Rules load from SQLite per call: only enabled, active, in starts/expires range, and scope matching group_id/user_id (daily time_window still filtered in-engine).
         rules_override_json: if set, replaces DB rules for this call only; no fire-state writes.
         extra_literal_triggers: e.g. self_id substrings for cheap recall.
         sample_roll: optional fixed roll in [0,1) for tests.
         """
+        gid = group_id or "*"
+        uid = user_id or "*"
+        ts = int(now_ts if now_ts is not None else time.time())
         conn = _open_db()
         try:
             if rules_override_json:
@@ -97,7 +103,7 @@ if _role in ("full", "gate"):
 
                 fire_record = None
             else:
-                rules = fetch_rules(conn)
+                rules = fetch_rules_for_eval(conn, group_id=gid, user_id=uid, now_ts=ts)
 
                 def fire_get(key: str) -> tuple[float, int, float]:
                     return get_fire_row(conn, key)
@@ -107,9 +113,9 @@ if _role in ("full", "gate"):
 
             return run_evaluate(
                 message_text=message_text,
-                group_id=group_id or "*",
-                user_id=user_id or "*",
-                now_ts=now_ts,
+                group_id=gid,
+                user_id=uid,
+                now_ts=ts,
                 rules=rules,
                 fire_get=fire_get,
                 fire_record=fire_record,

@@ -11,7 +11,7 @@ os.environ["BOT_ATTENTION_DB_PATH"] = str(ROOT / "data" / "test_flow.db")
 
 from attention.engine import evaluate_attention as ev
 from attention.models import TriggerRule
-from attention.store import connect, fetch_rules, get_fire_row, init_schema, record_fires, upsert_rule_row
+from attention.store import connect, fetch_rules_for_eval, get_fire_row, init_schema, record_fires, upsert_rule_row
 
 
 def main() -> None:
@@ -24,7 +24,7 @@ def main() -> None:
     conn.close()
 
     conn = connect(p)
-    rules = fetch_rules(conn)
+    rules = fetch_rules_for_eval(conn, group_id="g", user_id="u", now_ts=1)
     r = ev(
         message_text="foo bar",
         group_id="g",
