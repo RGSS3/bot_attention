@@ -28,7 +28,7 @@ class TriggerRule(BaseModel):
     reason_visibility: Literal["llm_only", "debug_and_llm"] = "llm_only"
     created_at: int | None = None
     updated_at: int | None = None
-    time_distribution: Literal["normal", "poisson"] = "normal"
+    time_distribution: Literal["normal", "linear", "poisson"] = "normal"
 
 
 class MatchedRuleOut(BaseModel):
@@ -38,10 +38,10 @@ class MatchedRuleOut(BaseModel):
     response_hint: str | None
     probability: float
     adjusted_probability: float = Field(
-        description="Probability after time_distribution (poisson linear remainder decay); used for max-merge and sampling gate.",
+        description="Probability after time_distribution (linear remainder vs exponential-in-time poisson); used for max-merge and sampling gate.",
     )
     priority: int
-    time_distribution: Literal["normal", "poisson"] = "normal"
+    time_distribution: Literal["normal", "linear", "poisson"] = "normal"
     expires_at: int | None = Field(default=None, description="Unix expiry if non-permanent; null if open-ended.")
     ttl_remaining_sec: int | None = Field(
         default=None,
@@ -56,7 +56,7 @@ class MatchedRuleOut(BaseModel):
 class EvaluateAttentionResult(BaseModel):
     should_consider: bool
     effective_probability: float = Field(
-        description="max(adjusted_probability) over matched rules; poisson rules decay toward window end.",
+        description="max(adjusted_probability) over matched rules; linear/poisson decay within starts_at..expires_at.",
     )
     matched_rules: list[MatchedRuleOut]
     baseline_used: bool

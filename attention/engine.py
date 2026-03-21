@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import re
 import time
@@ -8,6 +9,8 @@ from collections.abc import Callable
 from attention.models import EvaluateAttentionResult, MatchedRuleOut, TriggerRule
 
 MAX_REGEX_LEN = 512
+# exp(-λ) at window end for poisson mode; larger => steeper decay
+POISSON_DECAY_LAMBDA = 2.5
 
 
 def _parse_time_window(tw: str | None, now_local: time.struct_time) -> bool:
@@ -92,21 +95,27 @@ def _hourly_ok(count: int, window_start: float, cap: int, now: float) -> bool:
     return count < cap
 
 
-def _poisson_remainder_factor(rule: TriggerRule, now_ts: int) -> float:
-    """Linear decay: at window start factor=1, at expiry factor=0. Requires starts_at & expires_at."""
-    if rule.time_distribution != "poisson":
+def _time_window_decay_factor(rule: TriggerRule, now_ts: int) -> float:
+    """Within [starts_at, expires_at]: linear = remainder/total; poisson = exp(-λ * elapsed/total)."""
+    if rule.time_distribution == "normal":
         return 1.0
     if rule.expires_at is None:
         return 1.0
     if rule.starts_at is None or rule.expires_at <= rule.starts_at:
         return 1.0
-    total = rule.expires_at - rule.starts_at
-    rem = rule.expires_at - now_ts
-    return max(0.0, min(1.0, rem / total))
+    total = float(rule.expires_at - rule.starts_at)
+    rem = float(rule.expires_at - now_ts)
+    elapsed = total - rem
+    u = max(0.0, min(1.0, elapsed / total))
+    if rule.time_distribution == "linear":
+        return max(0.0, min(1.0, rem / total))
+    if rule.time_distribution == "poisson":
+        return max(0.0, min(1.0, math.exp(-POISSON_DECAY_LAMBDA * u)))
+    return 1.0
 
 
 def _adjusted_probability(rule: TriggerRule, now_ts: int) -> float:
-    return max(0.0, min(1.0, rule.probability * _poisson_remainder_factor(rule, now_ts)))
+    return max(0.0, min(1.0, rule.probability * _time_window_decay_factor(rule, now_ts)))
 
 
 def _ttl_aux(rule: TriggerRule, now_ts: int) -> tuple[int | None, str | None]:

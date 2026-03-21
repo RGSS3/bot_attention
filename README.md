@@ -39,7 +39,7 @@ Point both at the same `BOT_ATTENTION_DB_PATH` so rules and cooldown counters st
 
 - `evaluate_attention` — `message_str`, `group_id`, `user_id`, `timestamp`, optional `extra_literal_triggers`.
 - Each matched rule in the result includes **`ttl_remaining_sec` / `ttl_prompt_hint`** when `expires_at` is set (non-permanent), and **`adjusted_probability`** (after `time_distribution`).
-- Rule field **`time_distribution`**: `normal` (fixed `probability`) or **`poisson`** (linear decay by remaining TTL between `starts_at` and `expires_at`; persona helpers for TTL windows default to `poisson`). DB migrates automatically on connect (`ALTER TABLE` if missing).
+- Rule field **`time_distribution`**: `normal` (fixed `probability`); **`linear`** (factor = remaining TTL / window length); **`poisson`** (exponential-in-time decay `exp(-λ·elapsed/window)`, λ≈2.5). Persona TTL helpers default to **`linear`**. Existing DB rows that used the old `poisson` label for linear decay are migrated to `linear` once (`PRAGMA user_version`).
 - `upsert_rule` — JSON object for one `TriggerRule` row (`rule_id` is primary key).
 - `list_rules` — dump all rules from SQLite.
 - `end_rule` — set `status=ended` for a `rule_id`.

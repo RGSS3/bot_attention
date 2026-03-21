@@ -59,6 +59,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     _migrate_trigger_rules_columns(conn)
+    _migrate_legacy_poisson_to_linear(conn)
+
+
+def _migrate_legacy_poisson_to_linear(conn: sqlite3.Connection) -> None:
+    """Older builds stored linear remainder decay as time_distribution='poisson'; rename to 'linear'."""
+    row = conn.execute("PRAGMA user_version").fetchone()
+    v = int(row[0]) if row is not None else 0
+    if v >= 2:
+        return
+    try:
+        conn.execute(
+            "UPDATE trigger_rules SET time_distribution = 'linear' WHERE time_distribution = 'poisson'"
+        )
+    except sqlite3.OperationalError:
+        pass
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
 
 
 def _migrate_trigger_rules_columns(conn: sqlite3.Connection) -> None:

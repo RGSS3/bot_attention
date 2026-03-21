@@ -104,7 +104,7 @@ def build_user_focus_rule(
         trigger_reason=reason,
         response_hint=response_hint.strip() or None,
         reason_visibility="llm_only",
-        time_distribution="poisson",
+        time_distribution="linear",
     )
 
 
@@ -153,5 +153,5 @@ def build_topic_keyword_rule(
         trigger_reason=reason,
         response_hint=response_hint.strip() or None,
         reason_visibility="llm_only",
-        time_distribution="poisson",
+        time_distribution="linear",
     )
