@@ -227,7 +227,7 @@ if _role in ("full", "admin"):
         user_id: str,
         group_id: str = "",
         duration_minutes: float = 5.0,
-        probability: float = 0.88,
+        probability: float = 1.0,
         trigger_reason: str = "",
         response_hint: str = "",
         now_ts: int | None = None,
@@ -235,6 +235,7 @@ if _role in ("full", "admin"):
         """人格侧：接下来一小段时间里，更留意某个用户在当前作用域里说的任何话（不限具体话题）。
 
         对应 design 的“短时人物关注窗口”：内部用 regex `.*` + user 维度实现；expires_at 从当前时间向后推 duration_minutes。
+        默认 probability=1.0 且 time_distribution=poisson：窗口内有效概率随时间指数衰减（泊松式“间隔内回应机会”建模），可在参数里改 probability 或后续 upsert_rule 改分布。
         适合对话里判断“这个人现在特别值得听”；每次调用都会把同一条规则续期到新的截止时间（稳定 rule_id）。
         这不等于必须回复：门控仍可能放行，最终是否说话由你决定。
         """
@@ -268,13 +269,14 @@ if _role in ("full", "admin"):
         topic: str,
         group_id: str,
         duration_minutes: float = 5.0,
-        probability: float = 0.42,
+        probability: float = 1.0,
         trigger_reason: str = "",
         response_hint: str = "",
         now_ts: int | None = None,
     ) -> PersonaHelperResult:
         """人格侧：临时提高某个“话题词”（如「烧烤」）在**当前群**里的被关注概率，并在到期前可反复续期。
 
+        默认 probability=1.0 且 time_distribution=poisson（窗口内随时间指数衰减）；可改 probability 或 upsert_rule 调整。
         对应 design 的临时话题：仅 keyword 子串匹配，不做 NLP。
         本工具是 helper：必须从当前消息上下文给出**明确的群号** group_id；不接受留空、不接受通配 *（全群话题请用 upsert_rule 自行建模）。
         rule_id 对 (group_id, topic) 做了稳定哈希，同一群同一话题字串重复调用即续期；返回含 rule_id，便于需要时 end_rule。

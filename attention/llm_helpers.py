@@ -69,7 +69,7 @@ def build_user_focus_rule(
     user_id: str,
     group_id: str = "",
     duration_minutes: float = 5.0,
-    probability: float = 0.88,
+    probability: float = 1.0,
     trigger_reason: str = "",
     response_hint: str = "",
     now_ts: int | None = None,
@@ -104,7 +104,7 @@ def build_user_focus_rule(
         trigger_reason=reason,
         response_hint=response_hint.strip() or None,
         reason_visibility="llm_only",
-        time_distribution="linear",
+        time_distribution="poisson",
     )
 
 
@@ -118,7 +118,7 @@ def build_topic_keyword_rule(
     topic: str,
     group_id: str = "",
     duration_minutes: float = 5.0,
-    probability: float = 0.42,
+    probability: float = 1.0,
     trigger_reason: str = "",
     response_hint: str = "",
     now_ts: int | None = None,
@@ -153,5 +153,5 @@ def build_topic_keyword_rule(
         trigger_reason=reason,
         response_hint=response_hint.strip() or None,
         reason_visibility="llm_only",
-        time_distribution="linear",
+        time_distribution="poisson",
     )
