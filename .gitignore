@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 design.md
 ad.md
+plot_attention_decay.py
+decay_attention.png
 data/state.json
 data/*.db
 data/*.db-wal
