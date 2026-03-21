@@ -28,7 +28,10 @@ class TriggerRule(BaseModel):
     reason_visibility: Literal["llm_only", "debug_and_llm"] = "llm_only"
     created_at: int | None = None
     updated_at: int | None = None
-    time_distribution: Literal["normal", "linear", "poisson"] = "normal"
+    time_distribution: Literal["normal", "linear", "poisson"] = Field(
+        default="normal",
+        description="normal=fixed p; linear=scale by remaining TTL; poisson=exponential-in-time (Poisson-like engagement over the window).",
+    )
 
 
 class MatchedRuleOut(BaseModel):

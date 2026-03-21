@@ -9,7 +9,10 @@ from collections.abc import Callable
 from attention.models import EvaluateAttentionResult, MatchedRuleOut, TriggerRule
 
 MAX_REGEX_LEN = 512
-# exp(-λ) at window end for poisson mode; larger => steeper decay
+# Poisson mode: we treat "attention / worth replying" loosely like events in a Poisson-like process
+# over the TTL window—i.e. how likely a fresh "engagement opportunity" still feels as time passes.
+# Interarrival intuition → exponential damping in elapsed fraction: exp(-λ·u) at u=elapsed/window.
+# λ larger ⇒ steeper decay toward window end (factor exp(-λ) when u=1).
 POISSON_DECAY_LAMBDA = 2.5
 
 
@@ -96,7 +99,11 @@ def _hourly_ok(count: int, window_start: float, cap: int, now: float) -> bool:
 
 
 def _time_window_decay_factor(rule: TriggerRule, now_ts: int) -> float:
-    """Within [starts_at, expires_at]: linear = remainder/total; poisson = exp(-λ * elapsed/total)."""
+    """Within [starts_at, expires_at]:
+    linear — remaining fraction of the window (uniform shrink of effective p).
+    poisson — exponential in elapsed fraction (see POISSON_DECAY_LAMBDA: Poisson / no-memory style
+    modeling of "chance of a response-relevant beat" over the interval, not linear left-over time).
+    """
     if rule.time_distribution == "normal":
         return 1.0
     if rule.expires_at is None:
