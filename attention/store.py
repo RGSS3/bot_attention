@@ -45,7 +45,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             response_hint TEXT,
             reason_visibility TEXT NOT NULL DEFAULT 'llm_only',
             created_at INTEGER,
-            updated_at INTEGER
+            updated_at INTEGER,
+            time_distribution TEXT NOT NULL DEFAULT 'normal'
         );
 
         CREATE TABLE IF NOT EXISTS attention_fire (
@@ -57,6 +58,17 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
+    _migrate_trigger_rules_columns(conn)
+
+
+def _migrate_trigger_rules_columns(conn: sqlite3.Connection) -> None:
+    cur = conn.execute("PRAGMA table_info(trigger_rules)")
+    cols = {str(r[1]) for r in cur.fetchall()}
+    if "time_distribution" not in cols:
+        conn.execute(
+            "ALTER TABLE trigger_rules ADD COLUMN time_distribution TEXT NOT NULL DEFAULT 'normal'"
+        )
+        conn.commit()
 
 
 def _row_to_rule(row: sqlite3.Row) -> TriggerRule:
@@ -175,6 +187,7 @@ def upsert_rule_row(conn: sqlite3.Connection, rule: TriggerRule) -> None:
         "reason_visibility",
         "created_at",
         "updated_at",
+        "time_distribution",
     ]
     placeholders = ", ".join("?" * len(cols))
     conn.execute(
@@ -201,7 +214,8 @@ def upsert_rule_row(conn: sqlite3.Connection, rule: TriggerRule) -> None:
             trigger_reason = excluded.trigger_reason,
             response_hint = excluded.response_hint,
             reason_visibility = excluded.reason_visibility,
-            updated_at = excluded.updated_at
+            updated_at = excluded.updated_at,
+            time_distribution = excluded.time_distribution
         """,
         tuple(data[c] for c in cols),
     )

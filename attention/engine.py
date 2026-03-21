@@ -92,6 +92,47 @@ def _hourly_ok(count: int, window_start: float, cap: int, now: float) -> bool:
     return count < cap
 
 
+def _poisson_remainder_factor(rule: TriggerRule, now_ts: int) -> float:
+    """Linear decay: at window start factor=1, at expiry factor=0. Requires starts_at & expires_at."""
+    if rule.time_distribution != "poisson":
+        return 1.0
+    if rule.expires_at is None:
+        return 1.0
+    if rule.starts_at is None or rule.expires_at <= rule.starts_at:
+        return 1.0
+    total = rule.expires_at - rule.starts_at
+    rem = rule.expires_at - now_ts
+    return max(0.0, min(1.0, rem / total))
+
+
+def _adjusted_probability(rule: TriggerRule, now_ts: int) -> float:
+    return max(0.0, min(1.0, rule.probability * _poisson_remainder_factor(rule, now_ts)))
+
+
+def _ttl_aux(rule: TriggerRule, now_ts: int) -> tuple[int | None, str | None]:
+    """Remaining seconds and a short hint for non-permanent rules (prompt injection)."""
+    if rule.expires_at is None:
+        return None, None
+    rem = int(rule.expires_at - now_ts)
+    if rem <= 0:
+        return rem, "非永久规则：已到截止时间（若仍命中请核对消息时间与规则 expires_at）。"
+    if rem < 60:
+        hint = f"非永久规则：还剩约 {rem} 秒；窗口将结束，可按需续期。"
+    elif rem < 3600:
+        m = max(1, rem // 60)
+        hint = f"非永久规则：还剩约 {m} 分钟；如需保持关注可续期。"
+    else:
+        h, rest = divmod(rem, 3600)
+        m = rest // 60
+        if m >= 30:
+            hint = f"非永久规则：还剩约 {h + 1} 小时；可按需续期。"
+        elif h > 0:
+            hint = f"非永久规则：还剩约 {h} 小时{m} 分；可按需续期。"
+        else:
+            hint = f"非永久规则：还剩约 {max(1, m)} 分钟；可按需续期。"
+    return rem, hint
+
+
 def evaluate_attention(
     *,
     message_text: str,
@@ -159,7 +200,7 @@ def evaluate_attention(
                 -t[0].priority,
             )
         )
-        effective = max(r.probability for r, _ in matched)
+        effective = max(_adjusted_probability(r, ts) for r, _ in matched)
     elif literal_hits:
         effective = max(global_baseline_probability, 0.35)
         notes.append("literal_self_or_wake_mention")
@@ -170,6 +211,8 @@ def evaluate_attention(
 
     out_rules: list[MatchedRuleOut] = []
     for rule, hit in matched:
+        adj = _adjusted_probability(rule, ts)
+        ttl_sec, ttl_hint = _ttl_aux(rule, ts)
         out_rules.append(
             MatchedRuleOut(
                 rule_id=rule.rule_id,
@@ -177,7 +220,12 @@ def evaluate_attention(
                 trigger_reason=rule.trigger_reason,
                 response_hint=rule.response_hint,
                 probability=rule.probability,
+                adjusted_probability=adj,
                 priority=rule.priority,
+                time_distribution=rule.time_distribution,
+                expires_at=rule.expires_at,
+                ttl_remaining_sec=ttl_sec,
+                ttl_prompt_hint=ttl_hint,
             )
         )
 
