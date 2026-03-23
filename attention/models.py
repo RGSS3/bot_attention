@@ -59,7 +59,14 @@ class MatchedRuleOut(BaseModel):
 class EvaluateAttentionResult(BaseModel):
     should_consider: bool
     effective_probability: float = Field(
-        description="max(adjusted_probability) over matched rules; linear/poisson decay within starts_at..expires_at.",
+        description=(
+            "Sampling threshold: adjusted_probability of the single winning rule after sort "
+            "(group/user specificity desc, then priority desc, then rule_id). Not max over all hits."
+        ),
+    )
+    gate_rule_id: str | None = Field(
+        default=None,
+        description="rule_id that set effective_probability; null if decision came from baseline or literal triggers only.",
     )
     matched_rules: list[MatchedRuleOut]
     baseline_used: bool

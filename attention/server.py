@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from attention.engine import evaluate_attention as run_evaluate
 from attention.llm_helpers import (
+    build_group_focus_rule,
     build_nickname_rule,
     build_topic_keyword_rule,
     build_user_focus_rule,
@@ -82,14 +83,7 @@ if _role in ("full", "gate"):
         sample_roll: float | None = None,
         rules_override_json: str | None = None,
     ) -> EvaluateAttentionResult:
-        """Decide whether the QQ persona should *consider* replying (no NLP/LLM).
-
-        Astrbot can pass message_str, group_id, sender id, timestamp.
-        Rules load from SQLite per call: only enabled, active, in starts/expires range, and scope matching group_id/user_id (daily time_window still filtered in-engine).
-        rules_override_json: if set, replaces DB rules for this call only; no fire-state writes.
-        extra_literal_triggers: e.g. self_id substrings for cheap recall.
-        sample_roll: optional fixed roll in [0,1) for tests.
-        """
+        """门控：是否进入「考虑回复」。常用：message_text、group_id、user_id、now_ts（消息时间）；extra_literal_triggers 可传 bot 名/id 子串；rules_override_json 仅测试用；sample_roll 固定随机数调试用。"""
         gid = group_id or "*"
         uid = user_id or "*"
         ts = int(now_ts if now_ts is not None else time.time())
@@ -145,7 +139,7 @@ class ListRulesResult(BaseModel):
 class PersonaHelperResult(BaseModel):
     ok: bool = True
     rule_id: str
-    kind: str = Field(description="nickname | user_focus | topic_keyword")
+    kind: str = Field(description="nickname | user_focus | group_focus | topic_keyword")
     expires_at: int | None = Field(default=None, description="Unix ts when TTL ends; null for long-lived nickname")
     summary: str = Field(description="One-line Chinese recap for logs / self-check")
 
@@ -154,7 +148,7 @@ if _role in ("full", "admin"):
 
     @mcp.tool
     def upsert_rule(rule_json: str) -> UpsertRuleResult:
-        """Insert or replace one trigger rule by rule_id (JSON object matching TriggerRule fields)."""
+        """按 rule_id 写入或覆盖一条规则（JSON 与 TriggerRule 字段一致）。"""
         rule = TriggerRule.model_validate(json.loads(rule_json))
         conn = _open_db()
         try:
@@ -165,7 +159,7 @@ if _role in ("full", "admin"):
 
     @mcp.tool
     def list_rules() -> ListRulesResult:
-        """Return all rules from SQLite (same DB as gate)."""
+        """列出库里全部规则。"""
         conn = _open_db()
         try:
             rules = fetch_rules(conn)
@@ -175,7 +169,7 @@ if _role in ("full", "admin"):
 
     @mcp.tool
     def end_rule(rule_id: str) -> EndRuleResult:
-        """Mark a rule as ended (no longer participates in matching)."""
+        """将 rule_id 标为 ended，不再参与匹配。"""
         conn = _open_db()
         try:
             ok = end_rule_status(conn, rule_id)
@@ -193,13 +187,7 @@ if _role in ("full", "admin"):
         probability: float = 0.55,
         now_ts: int | None = None,
     ) -> PersonaHelperResult:
-        """人格侧：记住“某个用户（可选某个群）用什么称呼叫我”，以便之后更容易注意到相关消息。
-
-        对应 design 里称呼规则：用 keyword 命中称呼词；命中只表示“值得考虑接话”，你可以在最后仍选择不回复。
-        group_id 留空表示全群通用（group_id=*）；填具体群号则只在那个群里对该用户生效。
-        若称呼可能也在叫别人，请写 trigger_reason 说明歧义；response_hint 只影响生成语气，不参与是否命中。
-        同一 (group_id,user_id) 反复调用会覆盖同一条规则（稳定 rule_id），用于改名或改概率。
-        """
+        """记录称呼：user_id + nickname；group_id 空=全群。可填 trigger_reason / response_hint。重复调用同作用域会覆盖。"""
         rule = build_nickname_rule(
             user_id=user_id,
             nickname=nickname,
@@ -232,13 +220,7 @@ if _role in ("full", "admin"):
         response_hint: str = "",
         now_ts: int | None = None,
     ) -> PersonaHelperResult:
-        """人格侧：接下来一小段时间里，更留意某个用户在当前作用域里说的任何话（不限具体话题）。
-
-        对应 design 的“短时人物关注窗口”：内部用 regex `.*` + user 维度实现；expires_at 从当前时间向后推 duration_minutes。
-        默认 probability=1.0 且 time_distribution=poisson：窗口内有效概率随时间指数衰减（泊松式“间隔内回应机会”建模），可在参数里改 probability 或后续 upsert_rule 改分布。
-        适合对话里判断“这个人现在特别值得听”；每次调用都会把同一条规则续期到新的截止时间（稳定 rule_id）。
-        这不等于必须回复：门控仍可能放行，最终是否说话由你决定。
-        """
+        """短时盯某个用户在本作用域内的所有发言（默认约 5 分钟，可调 duration_minutes）。probability=0 可短时压低关注；更细调用 upsert_rule。"""
         rule = build_user_focus_rule(
             user_id=user_id,
             group_id=group_id,
@@ -265,6 +247,44 @@ if _role in ("full", "admin"):
         )
 
     @mcp.tool
+    def renew_short_group_focus(
+        group_id: str,
+        duration_minutes: float = 5.0,
+        probability: float = 1.0,
+        trigger_reason: str = "",
+        response_hint: str = "",
+        now_ts: int | None = None,
+    ) -> PersonaHelperResult:
+        """短时盯整个群（必填 group_id）。例如有人 at 了还没说话想盯后续。可调 duration_minutes、probability。"""
+        gid = group_id.strip()
+        if not gid or gid == "*":
+            raise ValueError(
+                "renew_short_group_focus 需要明确的 group_id（当前群号），不接受留空或 *。"
+            )
+        rule = build_group_focus_rule(
+            group_id=gid,
+            duration_minutes=duration_minutes,
+            probability=probability,
+            trigger_reason=trigger_reason,
+            response_hint=response_hint,
+            now_ts=now_ts,
+        )
+        conn = _open_db()
+        try:
+            upsert_rule_row(conn, rule)
+        finally:
+            conn.close()
+        return PersonaHelperResult(
+            rule_id=rule.rule_id,
+            kind="group_focus",
+            expires_at=rule.expires_at,
+            summary=(
+                f"已为群 {gid} 续期约 {duration_minutes:g} 分钟的全员消息关注窗口，"
+                f"截止 unix_ts={rule.expires_at}。"
+            ),
+        )
+
+    @mcp.tool
     def renew_temporary_topic(
         topic: str,
         group_id: str,
@@ -274,13 +294,7 @@ if _role in ("full", "admin"):
         response_hint: str = "",
         now_ts: int | None = None,
     ) -> PersonaHelperResult:
-        """人格侧：临时提高某个“话题词”（如「烧烤」）在**当前群**里的被关注概率，并在到期前可反复续期。
-
-        默认 probability=1.0 且 time_distribution=poisson（窗口内随时间指数衰减）；可改 probability 或 upsert_rule 调整。
-        对应 design 的临时话题：仅 keyword 子串匹配，不做 NLP。
-        本工具是 helper：必须从当前消息上下文给出**明确的群号** group_id；不接受留空、不接受通配 *（全群话题请用 upsert_rule 自行建模）。
-        rule_id 对 (group_id, topic) 做了稳定哈希，同一群同一话题字串重复调用即续期；返回含 rule_id，便于需要时 end_rule。
-        """
+        """当前群临时话题词（必填 group_id + topic），keyword 子串匹配；同词重复调用即续期。返回 rule_id 可 end_rule。"""
         gid = group_id.strip()
         if not gid or gid == "*":
             raise ValueError(

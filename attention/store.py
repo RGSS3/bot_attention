@@ -60,6 +60,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
     _migrate_trigger_rules_columns(conn)
     _migrate_legacy_poisson_to_linear(conn)
+    _migrate_rule_id_namespaces_v3(conn)
 
 
 def _migrate_legacy_poisson_to_linear(conn: sqlite3.Connection) -> None:
@@ -75,6 +76,41 @@ def _migrate_legacy_poisson_to_linear(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass
     conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+
+
+def _migrate_rule_id_namespaces_v3(conn: sqlite3.Connection) -> None:
+    """Rename legacy helper rule_id prefixes (idempotent; safe to run every connect).
+
+    Not gated on user_version alone: a DB may reach v3 before legacy rows exist (e.g. tests or restores).
+    """
+    replacements = [
+        ("addr:", "long:nickname:"),
+        ("focus_user:", "short:user_focus:"),
+        ("focus_group:", "short:group_focus:"),
+        ("topic_kw:", "short:topic_kw:"),
+    ]
+    cur = conn.execute("SELECT rule_id FROM trigger_rules")
+    old_ids = [str(r[0]) for r in cur.fetchall()]
+    for old_id in old_ids:
+        new_id: str | None = None
+        for old_p, new_p in replacements:
+            if old_id.startswith(old_p):
+                new_id = new_p + old_id[len(old_p) :]
+                break
+        if new_id is None or new_id == old_id:
+            continue
+        conn.execute("UPDATE trigger_rules SET rule_id = ? WHERE rule_id = ?", (new_id, old_id))
+        cur_f = conn.execute("SELECT state_key FROM attention_fire")
+        prefix = old_id + "|"
+        for (sk,) in cur_f.fetchall():
+            if sk.startswith(prefix):
+                new_sk = new_id + sk[len(old_id) :]
+                conn.execute("UPDATE attention_fire SET state_key = ? WHERE state_key = ?", (new_sk, sk))
+    row = conn.execute("PRAGMA user_version").fetchone()
+    v = int(row[0]) if row else 0
+    if v < 3:
+        conn.execute("PRAGMA user_version = 3")
     conn.commit()
 
 

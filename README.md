@@ -37,7 +37,7 @@ Point both at the same `BOT_ATTENTION_DB_PATH` so rules and cooldown counters st
 
 ## Tools
 
-- `evaluate_attention` — `message_str`, `group_id`, `user_id`, `timestamp`, optional `extra_literal_triggers`.
+- `evaluate_attention` — `message_str`, `group_id`, `user_id`, `timestamp`, optional `extra_literal_triggers`. **Gate merge:** among hits, **one winner** by (specificity → **priority** → `rule_id`), **not** `max(probability)`; result includes **`gate_rule_id`**. `matched_rules` is sorted the same way — **first entry is the winner**. Cooldown write applies to the winner only when `should_consider`.
 - Each matched rule in the result includes **`ttl_remaining_sec` / `ttl_prompt_hint`** when `expires_at` is set (non-permanent), and **`adjusted_probability`** (after `time_distribution`).
 - Rule field **`time_distribution`**: `normal` (fixed `probability`); **`linear`** (factor = remaining TTL / window length); **`poisson`** — models attention roughly as **events over the TTL interval** (how much "one more worth-engaging beat" remains plausible as time passes); implementation uses **exponential damping** `exp(-λ·elapsed/window)` (Poisson / memoryless flavor), λ≈2.5. Persona short-term helpers (`renew_short_user_focus`, `renew_temporary_topic`) default to **`poisson`** with **`probability=1.0`** (decay is entirely from the exponential time factor). Legacy rows that stored linear decay under the old `poisson` label are migrated to `linear` once (`PRAGMA user_version`).
 - `upsert_rule` — JSON object for one `TriggerRule` row (`rule_id` is primary key).
@@ -46,13 +46,18 @@ Point both at the same `BOT_ATTENTION_DB_PATH` so rules and cooldown counters st
 
 ### Persona helpers (admin / full)
 
-Plain arguments only; long **docstrings** are meant to double as in-prompt guidance for the LLM.
+参数以平铺为主；工具 docstring 只写常见用法（原理见仓库内 `engine` / README 门控合并说明）。
+
+默认 **priority**：长期称呼 **40**；短期话题 **62**、短期群关注 **72**、短期盯人 **82**（短期整体高于长期，合并时易压过 `remember_*`）。
+
+Persona 写入的 **`rule_id` 带类型前缀**，长期与短期不可能撞 key：`long:nickname:{group}:{user}`、`short:user_focus:{group}:{user}`、`short:group_focus:{group}`、`short:topic_kw:{group}:h…`。旧库中带 `addr:` / `focus_*` / `topic_kw:` 的行在每次连接时会**幂等**迁到新前缀（并同步 `attention_fire` 的 `state_key`）。
 
 | Tool | Intent |
 |------|--------|
-| `remember_user_addressing_me` | User story B：某用户（可选某群）对你的称呼 → keyword 规则，长期有效。 |
-| `renew_short_user_focus` | User story G：短时“听这个人说的一切”→ `.*` + user 维度，默认续期约 5 分钟。 |
-| `renew_temporary_topic` | User story D：临时话题词 → keyword + TTL；**必填当前群 `group_id`**（不接受空或 `*`）；续期靠同一 `(group, topic)`；`rule_id` 稳定哈希。 |
+| `remember_user_addressing_me` | 长期称呼 keyword。 |
+| `renew_short_user_focus` | 短时盯某用户全文；可调 `probability`、`duration_minutes`。 |
+| `renew_short_group_focus` | 短时盯全群；**必填群号**。 |
+| `renew_temporary_topic` | 当前群话题词 TTL；**必填 group_id + topic**。 |
 
 ## Dev check
 

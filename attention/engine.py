@@ -208,15 +208,19 @@ def evaluate_attention(
                 literal_hits.append(lit)
 
     baseline_used = not matched and not literal_hits
+    gate_rule_id: str | None = None
     if matched:
         matched.sort(
             key=lambda t: (
                 -_specificity(t[0])[0],
                 -_specificity(t[0])[1],
                 -t[0].priority,
+                t[0].rule_id,
             )
         )
-        effective = max(_adjusted_probability(r, ts) for r, _ in matched)
+        win_rule, _ = matched[0]
+        gate_rule_id = win_rule.rule_id
+        effective = _adjusted_probability(win_rule, ts)
     elif literal_hits:
         effective = max(global_baseline_probability, 0.35)
         notes.append("literal_self_or_wake_mention")
@@ -246,12 +250,13 @@ def evaluate_attention(
         )
 
     if should and matched and fire_record is not None:
-        keys = [_state_key(rule.rule_id, group_id, user_id) for rule, _ in matched]
-        fire_record(keys, now)
+        win_rule, _ = matched[0]
+        fire_record([_state_key(win_rule.rule_id, group_id, user_id)], now)
 
     return EvaluateAttentionResult(
         should_consider=should,
         effective_probability=effective,
+        gate_rule_id=gate_rule_id,
         matched_rules=out_rules,
         baseline_used=baseline_used,
         sample_roll=roll,
