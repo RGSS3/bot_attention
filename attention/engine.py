@@ -14,6 +14,10 @@ MAX_REGEX_LEN = 512
 # Interarrival intuition → exponential damping in elapsed fraction: exp(-λ·u) at u=elapsed/window.
 # λ larger ⇒ steeper decay toward window end (factor exp(-λ) when u=1).
 POISSON_DECAY_LAMBDA = 2.5
+#
+# Keep a lower bound for the time factor in poisson mode, so short TTL "mute/attention windows"
+# don't collapse to near-zero probability too quickly (e.g. exp(-2.5) ≈ 0.08 at u=1).
+POISSON_MIN_FACTOR = 0.5
 
 
 def _parse_time_window(tw: str | None, now_local: time.struct_time) -> bool:
@@ -117,7 +121,10 @@ def _time_window_decay_factor(rule: TriggerRule, now_ts: int) -> float:
     if rule.time_distribution == "linear":
         return max(0.0, min(1.0, rem / total))
     if rule.time_distribution == "poisson":
-        return max(0.0, min(1.0, math.exp(-POISSON_DECAY_LAMBDA * u)))
+        # With a short TTL window, pure exp(-λ·u) may become too small too early.
+        # Add a floor so the effective probability never drops below POISSON_MIN_FACTOR.
+        raw = math.exp(-POISSON_DECAY_LAMBDA * u)
+        return max(POISSON_MIN_FACTOR, min(1.0, raw))
     return 1.0
 
 
