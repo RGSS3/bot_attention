@@ -184,7 +184,7 @@ if _role in ("full", "admin"):
         group_id: str = "",
         trigger_reason: str = "",
         response_hint: str = "",
-        probability: float = 0.55,
+        probability: float = 0.85,
         now_ts: int | None = None,
     ) -> PersonaHelperResult:
         """记录称呼：user_id + nickname；group_id 空=全群。可填 trigger_reason / response_hint。重复调用同作用域会覆盖。"""
